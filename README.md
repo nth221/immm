@@ -45,13 +45,17 @@ $$
 
 **Dual-level output.** ATC3 logits pool the CID logits of each class's member compounds and add a term conditioned on $\mathbf{q}^{(t)}$. The CID head drives prediction and the DDI penalty; the ATC3 head carries the therapeutic supervision and is what the reported Jaccard, F1-score, AUPRC, and AUROC are computed on. Molecular representations are never aggregated during inference.
 
-**Objective.** Prescription accuracy and interaction safety are balanced at the compound level, with auxiliary supervision at the class level:
+**Objective.** The base loss mixes binary cross-entropy with multi-label margin ranking, and the compound-level loss trades it off against the TWOSIDES DDI penalty, with auxiliary supervision at the class level:
+
+$$
+\mathcal{L}^{(t)}_{\mathrm{base}} = \alpha \mathcal{L}^{(t)}_{\mathrm{bce}} + (1-\alpha) \mathcal{L}^{(t)}_{\mathrm{multi}}
+$$
 
 $$
 \mathcal{L}^{(t)} = \underbrace{\beta \mathcal{L}^{(t)}_{\mathrm{base}} + (1-\beta) \mathcal{L}^{(t)}_{\mathrm{DDI}}}_{\mathcal{L}^{(t)}_{\mathrm{CID}}} + \mathcal{L}^{(t)}_{\mathrm{ATC3}}
 $$
 
-where $\mathcal{L}^{(t)}_{\mathrm{base}} = \alpha \mathcal{L}^{(t)}_{\mathrm{bce}} + (1-\alpha) \mathcal{L}^{(t)}_{\mathrm{multi}}$, the DDI term penalizes interacting CID pairs from TWOSIDES, and $\beta$ decays from 1 once the running DDI rate exceeds $\gamma$. We set $\alpha = 0.95$ and $K_p = 0.05$ for both datasets, with $\gamma = 0.04$ for MIMIC-III and $\gamma = 0.01$ for MIMIC-IV.
+The coefficient $\beta$ decays from 1 once the running DDI rate exceeds $\gamma$. We set $\alpha = 0.95$ and $K_p = 0.05$ for both datasets, with $\gamma = 0.04$ for MIMIC-III and $\gamma = 0.01$ for MIMIC-IV.
 
 ## Repository layout
 
