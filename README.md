@@ -283,6 +283,12 @@ Removing GQM inflates the DDI rate 2.6×, so IRI carries interaction signal that
 
 IM<sup>3</sup> reaches the lowest DDI rate on both datasets, a reduction of over 60% against the strongest molecular structure-aware baseline, while staying competitive on therapeutic relevance and without shrinking the prescription set.
 
+<p align="center">
+  <img src="assets/chord_diagram.jpg" width="100%" alt="Chord diagram of DDI connectivity in recommended prescriptions"/>
+</p>
+
+DDI connectivity in the recommended prescriptions for a random 10% sample of MIMIC-III test patients. The outer ring denotes ATC3 therapeutic classes, the inner ring denotes CID-level drugs, and edges indicate DDI-prone drug pairs. Denser connectivity means more frequent unsafe co-prescriptions; IM<sup>3</sup> produces the sparsest interaction structure among the compared methods.
+
 ---
 
 ## Reproducibility
