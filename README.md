@@ -16,20 +16,20 @@
 
 ---
 
-Official implementation of **"IM<sup>3</sup>: Interaction Region-Augmented Multimodal Molecular Modeling for Precision Prescription"**, to appear at **CIKM '26** (Rome, Italy).
+Official implementation of **"IM<sup>3</sup>: Interaction Region-Augmented Multimodal Molecular Modeling for Precision Prescription"**, published in the proceedings of **CIKM '26**.
 
-IM<sup>3</sup> recommends medication combinations from longitudinal EHRs while explicitly suppressing drug-drug interaction (DDI) risk. It does so by encoding each drug through its **Interaction Region Indicator (IRI)** field, a real-space electronic descriptor derived from DFT, instead of relying on molecular topology or historical co-prescription statistics alone.
+IM<sup>3</sup> recommends medication combinations from longitudinal electronic health records (EHRs) with a compound-level penalty for known drug–drug interactions (DDIs). It integrates electronic-structure information from density functional theory (DFT)-derived **Interaction Region Indicator (IRI)** fields with BRICS-based molecular substructure features
 
-**Two ideas carry the method:**
+**The framework is built around two key design principles:**
 
-- **Dual-level formulation.** DDIs arise between specific compounds, but prescriptions are judged by therapeutic class. IM<sup>3</sup> keeps these apart: interaction risk is modeled and penalized at the **CID level** (PubChem Compound ID), while therapeutic validity is supervised and evaluated at the **ATC3 level**. Molecular representations are never collapsed into class labels during inference.
-- **Quantum-informed drug representations rather than topological drug representation.** Molecules with near-identical graph topology can interact very differently. IM<sup>3</sup> pairs a **global** encoder over DFT-derived IRI fields with a **local** encoder over BRICS substructures, capturing interaction propensity that static connectivity does not expose.
+- **Dual-level formulation.** DDI risk is modeled at the compound level, whereas therapeutic relevance is supervised and evaluated at the ATC3 level. IM<sup>3</sup> keeps these apart: interaction risk is modeled and penalized at the **CID level** (PubChem Compound ID), while therapeutic validity is supervised and evaluated at the **ATC3 level**. CID-level drug representations are retained during inference, while ATC3 predictions are derived from CID-level scores.
+- **Electronic-structure-informed and substructure-aware drug representations.** Molecules with similar graph connectivity may exhibit different electronic structures and interaction properties. IM<sup>3</sup> pairs a **global** encoder over DFT-derived IRI fields with a **local** encoder over BRICS substructures, capturing interaction propensity that static connectivity does not expose.
 
 ---
 
 ## Architecture
 
-Three components, wired end to end in [`src/IM3.py`](src/IM3.py). Notation follows the paper: $\mathcal{M}$ is the CID-level medication vocabulary, $\mathcal{S}$ the BRICS fragment vocabulary, and $d$ the shared embedding dimension.
+The framework consists of three components implemented in [`src/IM3.py`](src/IM3.py). Notation follows the paper: $\mathcal{M}$ is the CID-level medication vocabulary, $\mathcal{S}$ the BRICS fragment vocabulary, and $d$ the shared embedding dimension.
 
 | Component | Role | Output |
 |---|---|---|
@@ -43,7 +43,7 @@ $$
 \mathbf{E}_{\mathrm{d}} = \bar{\mathbf{V}}_{\mathrm{G}} \odot \bar{\mathbf{V}}_{\mathrm{L}}, \qquad \hat{\mathbf{o}}^{(t)} = \sigma\left(\mathbf{E}_{\mathrm{d}} \, \mathbf{q}^{(t)}\right) \in \mathbb{R}^{|\mathcal{M}|}
 $$
 
-**Dual-level output.** ATC3 logits pool the CID logits of each class's member compounds and add a term conditioned on $\mathbf{q}^{(t)}$. The CID head drives prediction and the DDI penalty; the ATC3 head carries the therapeutic supervision and is what the reported Jaccard, F1-score, AUPRC, and AUROC are computed on. Molecular representations are never aggregated during inference.
+**Dual-level output.** ATC3 logits pool the CID logits of each class's member compounds and add a term conditioned on $\mathbf{q}^{(t)}$. The CID head produces compound-level scores used for the DDI penalty, while the ATC3 head provides class-level predictions for therapeutic supervision and evaluation. Jaccard, F1-score, AUPRC, and AUROC are computed at the ATC3 level. CID-level molecular representations are preserved, while class-level predictions are obtained by aggregating CID-level scores.
 
 **Objective.** The base loss mixes binary cross-entropy with multi-label margin ranking, and the compound-level loss trades it off against the TWOSIDES DDI penalty, with auxiliary supervision at the class level:
 
@@ -163,19 +163,19 @@ This writes the following into `data/<dataset>/output/`:
 | `ddi_mask_H.pkl` | Drug-substructure incidence mask |
 | `cidtoSMILES.pkl`, `cidtoATC3.pkl` | Molecular and therapeutic-class lookups |
 
-**Note.** `processing.py` currently resolves paths against `data/mimic-iv/`. Adjust `BASE_DIR` at the top of the file to regenerate the MIMIC-III artifacts.
+**Note.** By default, `processing.py` uses `data/mimic-iv/` as its base directory. To preprocess MIMIC-III, set `BASE_DIR` to the corresponding dataset directory.
 
 ---
 
 ## Training & evaluation
 
-The active dataset is a module-level constant near the top of [`src/main.py`](src/main.py):
+Select the dataset by setting the DATASET constant in [`src/main.py`](src/main.py):
 
 ```python
 DATASET = "mimic-iii"    # or "mimic-iv"
 ```
 
-All data paths, including the precomputed IRI and BRICS tensors, are resolved from it, so the script runs from any working directory.
+The `DATASET` setting determines the data paths for the selected dataset, including the precomputed IRI and BRICS tensors.
 
 ```bash
 cd src
@@ -183,11 +183,11 @@ python main.py                                        # train (sweeps 6 seed set
 python main.py --Test --resume_path [best_epoch.model]   # evaluate a checkpoint
 ```
 
-Checkpoints land in `_saved/IM3_<dataset>_Set<i>__GQM1_LSM1/`, one file per epoch, tagged with its validation ATC3 Jaccard, CID Jaccard, and DDI rate. Test mode reports mean ± std over 10 bootstrap resamples (80% of the test split each).
+Checkpoints are saved under `_saved/IM3_<dataset>_Set<i>__GQM1_LSM1/`, one file per epoch, tagged with its validation ATC3 Jaccard, CID Jaccard, and DDI rate. Test mode reports the mean ± standard deviation across 10 bootstrap resamples, each comprising 80% of the test split.
 
 ### Configuration
 
-Hyperparameters are `argparse` flags. Defaults target MIMIC-III; override the two starred rows for MIMIC-IV.
+Hyperparameters are configured through `argparse` flags. The default values correspond to MIMIC-III. For MIMIC-IV, set `--dim 512` and `--target_ddi 0.01`.
 
 | Flag | MIMIC-III | MIMIC-IV | Meaning |
 |---|---|---|---|
@@ -199,11 +199,11 @@ Hyperparameters are `argparse` flags. Defaults target MIMIC-III; override the tw
 | `--fixed_thr_cid` | `None` | `None` | Fix the CID decision threshold at test time |
 | `--fixed_thr_atc3` | `None` | `None` | Fix the ATC3 decision threshold at test time |
 
-Training runs 50 epochs. Decision thresholds are **tuned on validation** by maximizing sample-averaged F1 over a 0.01 to 0.99 grid, then held fixed at test time, so pass them explicitly via `--fixed_thr_*` when evaluating a checkpoint.
+Training runs 50 epochs. Decision thresholds are selected on **the validation split** by maximizing sample-averaged F1 over a grid from 0.01 to 0.99. The selected thresholds are then supplied through `--fixed_thr_cid` and `--fixed_thr_atc3` for test-set evaluation.
 
 ### Ablations
 
-The two molecular encoders are toggled independently, reproducing Table 4 of the paper. Checkpoints are kept in separate directories per configuration.
+The two molecular encoders can be enabled or disabled independently to reproduce the ablation experiments in Table 4 of the paper. Checkpoints are kept in separate directories per configuration.
 
 ```bash
 python main.py --use_gqm 0      # w/o GQM Encoder: no IRI, structure only
@@ -214,7 +214,7 @@ python main.py --use_lsm 0      # w/o LSM Encoder: no BRICS fragments
 
 ## Results
 
-Dual-level protocol: **DDI Rate** and **Avg # Drugs** are measured at the CID level, while **Jaccard**, **F1-score**, **AUPRC**, and **AUROC** are evaluated at the ATC3 level. All baselines are trained and evaluated on the same CID-level medication vocabulary as IM<sup>3</sup>, rather than through post-hoc mapping from ATC-level outputs. Results are reported as mean ± std over six random seeds. For each metric, the best result and any result not statistically distinguishable from it are shown in **bold** (paired *t*-test, *p* ≥ 0.05).
+Dual-level protocol: **DDI Rate** and **Avg # Drugs** are measured at the CID level, while **Jaccard**, **F1-score**, **AUPRC**, and **AUROC** are evaluated at the ATC3 level. All baselines are trained and evaluated on the same CID-level medication vocabulary as IM<sup>3</sup>, rather than through post-hoc mapping from ATC-level outputs. Results are reported as mean ± std over six random seeds. For each metric with an indicated optimization direction (↑ or ↓), bold identifies the best observed mean and other results for which the paired t-test does not detect a significant difference (p ≥ 0.05). Avg # Drugs is reported descriptively.
 
 <details open>
 <summary><b>MIMIC-III</b>: ground truth 11.95 drugs per visit, empirical DDI rate 0.2509</summary>
@@ -277,17 +277,17 @@ Dual-level protocol: **DDI Rate** and **Avg # Drugs** are measured at the CID le
 | w/o LSM Encoder | 0.0392 ± 0.0116 | **0.4923 ± 0.0022** | **0.6463 ± 0.0022** | **0.7304 ± 0.0029** | **0.9361 ± 0.0008** | 15.6720 ± 1.5566 |
 | **IM<sup>3</sup>** | **0.0295 ± 0.0043** | 0.4874 ± 0.0018 | 0.6421 ± 0.0016 | 0.7282 ± 0.0014 | 0.9356 ± 0.0005 | 12.8677 ± 2.0642 |
 
-Removing GQM inflates the DDI rate 2.6×, so IRI carries interaction signal that structure alone does not. Removing LSM nudges accuracy up but loosens prescription size, so the fragment encoder acts as a structural regularizer. Neither encoder achieves the full model's balance in isolation.
+Removing GQM increases the DDI rate from 0.0295 to 0.0766 (2.6×), suggesting that the IRI-based encoder contributes to DDI risk reduction. Removing LSM slightly improves ATC3-level predictive performance while increasing both the DDI rate and average prescription size. These results suggest that LSM contributes to the trade-off between therapeutic relevance and interaction risk. The full model achieves the lowest DDI rate among the ablation configurations, with ATC3-level predictive performance close to that of the best-performing ablated variant.
 
 </details>
 
-IM<sup>3</sup> reaches the lowest DDI rate on both datasets, a reduction of over 60% against the strongest molecular structure-aware baseline, while staying competitive on therapeutic relevance and without shrinking the prescription set.
+IM<sup>3</sup> achieves the lowest DDI rate among the compared methods on both datasets. Relative to the molecular structure-aware baseline with the lowest DDI rate in each dataset, it reduces the rate by 64.2% on MIMIC-III and 63.2% on MIMIC-IV. ATC3-level predictive performance remains competitive, although the MIMIC-IV results reveal a trade-off against the best-performing predictive baselines. The average number of recommended drugs remains above the corresponding empirical mean.
 
 <p align="center">
   <img src="assets/chord_diagram.jpg" width="100%" alt="Chord diagram of DDI connectivity in recommended prescriptions"/>
 </p>
 
-DDI connectivity in the recommended prescriptions for a random 10% sample of MIMIC-III test patients. The outer ring denotes ATC3 therapeutic classes, the inner ring denotes CID-level drugs, and edges indicate DDI-prone drug pairs. Denser connectivity means more frequent unsafe co-prescriptions; IM<sup>3</sup> produces the sparsest interaction structure among the compared methods.
+DDI connectivity in the recommended prescriptions for a random 10% sample of MIMIC-III test patients. The outer ring denotes ATC3 therapeutic classes, the inner ring denotes CID-level drugs, and edges indicate DDI-prone drug pairs. A greater number of edges indicates more drug pairs flagged as interacting by the DDI reference. In the visualized sample, IM<sup>3</sup> exhibits the sparsest DDI connectivity among the compared methods.
 
 ---
 
@@ -296,7 +296,7 @@ DDI connectivity in the recommended prescriptions for a random 10% sample of MIM
 - `main.py` sweeps **six seed sets** in a single invocation (`(1001,…), (2001,…), …, (6001,…)`), covering `torch`, `numpy`, `random`, and CUDA, with `cudnn.deterministic = True`.
 - Patients are split **4:1:1** (train / validation / test) at the patient level, not the visit level.
 - Decision thresholds are selected on validation only; no test-set information enters threshold selection.
-- The IRI and BRICS tensors are frozen buffers, so molecular representations are byte-identical across every run and every ablation.
+- The precomputed IRI and BRICS input tensors are held fixed across runs. Each ablation excludes the corresponding encoder while retaining the same input features for the remaining components.
 
 ---
 
@@ -305,14 +305,14 @@ DDI connectivity in the recommended prescriptions for a random 10% sample of MIM
 
 ```bibtex
 @inproceedings{kim2026im3,
-  title     = {{IM}$^3$: Interaction Region-Augmented Multimodal Molecular Modeling for Precision Prescription},
+  title     = {{IM$^3$}: Interaction Region-Augmented Multimodal Molecular Modeling for Precision Prescription},
   author    = {Kim, Yujin and Park, Seoeun and Hong, Charmgil},
   booktitle = {Proceedings of the 35th ACM International Conference on Information and Knowledge Management (CIKM '26)},
   year      = {2026},
   address   = {Rome, Italy},
   publisher = {Association for Computing Machinery},
   doi       = {10.1145/3799682.3841136},
-  isbn      = {979-8-4007-2539-5/2026/11}
+  isbn      = {979-8-4007-2539-5}
 }
 ```
 
